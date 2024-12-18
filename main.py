@@ -422,9 +422,20 @@ def tab4():
     # プルダウン選択肢
     options = ["reach cost", "reach", "target_cost"]
     mode = st.selectbox("モードを選択してください", options, index=2)  # indexでデフォルト選択
+    
+    uploaded_file = st.file_uploader("ファイルをアップロードしてください", type=["csv", "xlsx"])
 
-    uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=["xlsx"])
-
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                df = pd.read_excel(uploaded_file)
+            elif uploaded_file.type == "text/csv":
+                df = pd.read_csv(uploaded_file)
+            st.write("ファイルプレビュー:", df.head())
+        except Exception as e:
+            st.error(f"ファイルの処理に失敗しました: {e}")
+    else:
+        st.warning("ファイルをアップロードしてください。")
     if uploaded_file is not None:
         try:
             st.write("アップロードされたファイルの中身を読み込み中...")
