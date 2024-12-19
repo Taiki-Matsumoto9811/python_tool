@@ -1453,7 +1453,7 @@ def tab5():
 #Streamlitを実行する関数
 def main():
     if login():
-        tabs = st.sidebar.radio("メニュー", ["Curve数式予測", "STL分解", "Logistic回帰", "TIME最適化")
+        tabs = st.sidebar.radio("メニュー", ["Curve数式予測", "STL分解", "Logistic回帰", "TIME最適化"])
 
         # ログアウトボタン
         if st.button("ログアウト"):
