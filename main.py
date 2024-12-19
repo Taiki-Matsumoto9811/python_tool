@@ -9,6 +9,7 @@ import statsmodels.formula.api as smf
 
 # ユーザーデータの作成（実際には安全な方法で保存する必要があります）
 user_data = {
+    'yomiko_mcc','admin4035'
     'user1': 'password1',
     'user2': 'password2',
     # 他のユーザー情報
