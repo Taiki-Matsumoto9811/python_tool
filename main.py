@@ -423,6 +423,11 @@ def tab4():
     options = ["reach cost", "reach", "target_cost"]
     mode = st.selectbox("モードを選択してください", options, index=2)  # indexでデフォルト選択
 
+    # アップロードされたファイルがあるか確認
+    if "uploaded_file" not in st.session_state:
+        st.session_state["uploaded_file"] = None
+
+    # ファイルアップロード
     uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=["xlsx"])
 
     if uploaded_file is not None:
@@ -880,26 +885,574 @@ def tab4():
                     allocated_brand_data.to_excel(writer, sheet_name='allocated_brand_cost', index=True)
                 output.seek(0)
                 return output
-
+            
+            excel_file = create_excel_file()
+            
             # Streamlitアプリ本体
             st.title("Excelファイル出力")
-
             # ボタンでExcelファイルを生成・ダウンロード
-            if st.button("Excelファイルを生成"):
-                excel_file = create_excel_file()
-                st.download_button(
-                    label="Excelファイルをダウンロード",
-                    data=excel_file,
-                    file_name="output.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            st.download_button(
+                label="Excelファイルをダウンロード",
+                data=excel_file,
+                file_name="output.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
         except Exception as e:
             st.error(f"ファイルを読み込む際にエラーが発生しました: {e}")
 
+#tab5用の初期化、実行に関わる関数==========================
+def initialize_session_state():
+    """セッションステートの初期化"""
+    defaults = {
+        "current_step": "モード選択",  # 初期ステップ
+        "uploaded_file": None,  # アップロードされたファイル
+        "processed_data": None,  # 処理されたデータ
+        "allocated_cost_data": None,  # 残コストデータ
+        "allocated_program_data": None,  # 割り付けログ
+        "mode": "",  # モード選択
+        "step_status": {
+            "モード選択": True,  # 最初のステップをTrue
+            "ファイルアップロード": False,
+            "実行": False,
+        },
+        # ログイン情報（例: ユーザー情報）はここで保持
+        "user_info": st.session_state.get("user_info", None),  # ログイン情報を保持
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+def reset_app():
+    """特定のセッションステート項目のみをリセット"""
+    keys_to_reset = [
+        "current_step", 
+        "uploaded_file", 
+        "processed_data", 
+        "allocated_cost_data", 
+        "allocated_program_data", 
+        "mode", 
+        "step_status",
+    ]
+    for key in keys_to_reset:
+        if key in st.session_state:
+            del st.session_state[key]
+    initialize_session_state()  # 再初期化
+
+def display_mode_selection():
+    """モード選択画面"""
+    if st.session_state["step_status"]["モード選択"]:
+        st.header("モード選択")
+        options = ["", "reach_cost", "reach", "target_cost"]  # 空欄を追加
+        st.session_state["mode"] = st.selectbox("モードを選択してください", options)
+        
+        if st.session_state["mode"] == "":
+            st.warning("モードを選択してください")
+        else:
+            st.write(f"選択されたモード: {st.session_state['mode']}")
+            if st.button("次へ", key="to_upload"):
+                st.session_state["current_step"] = "ファイルアップロード"
+                st.session_state["step_status"]["ファイルアップロード"] = True
+
+def display_file_upload():
+    """ファイルアップロード画面"""
+    if st.session_state["step_status"]["ファイルアップロード"]:
+        st.header("ファイルアップロード")
+        if st.session_state["uploaded_file"] is None:
+            uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=["xlsx"])
+            if uploaded_file is not None:
+                st.session_state["uploaded_file"] = uploaded_file
+        else:
+            st.write("既にアップロードされたファイルがあります。")
+            st.write(f"アップロード済みファイル: {st.session_state['uploaded_file'].name}")
+
+        if st.session_state["uploaded_file"] is not None:
+            if st.button("次へ", key="to_execute"):
+                st.session_state["current_step"] = "実行"
+                st.session_state["step_status"]["実行"] = True
+
+def display_execution():
+    """実行画面"""
+    if st.session_state["step_status"]["実行"]:
+        st.header("最適化の実行")
+        st.write(f"選択されたモード: {st.session_state['mode']}")
+
+        if st.session_state["processed_data"] is None and st.session_state["uploaded_file"] is not None:
+            st.write("処理を実行しています...")
+            bytes_data = st.session_state["uploaded_file"].read()
+            sheets = pd.read_excel(BytesIO(bytes_data), sheet_name=None)
+
+            # 各シートを取得
+            limit_data = sheets['A_Limit'].set_index(['Program_code', 'date'])
+            brand_data = sheets['B_Brand'].set_index('Brand')
+            view_data = sheets['C_View'].set_index('Sample')
+            target_data = sheets['D_Target'].set_index('Brand')
+
+            # データを表示
+            st.write("A_Limit シートのデータ")
+            st.dataframe(limit_data.head())
+            st.write("B_Brand シートのデータ")
+            st.dataframe(brand_data.head())
+            st.write("C_View シートのデータ")
+            st.dataframe(view_data.head())
+            st.write("D_Target シートのデータ")
+            st.dataframe(target_data.head())
+
+            # 「無し」という値を空白に置き換え、必須番組データと除外データを作成
+            exc_data = limit_data.copy()
+            must_data = limit_data.copy()
+
+            values_to_replace_exc = [15, 30, 60, 120, 240]
+            values_to_replace_must = ["無し"]
+            exc_data.replace(values_to_replace_exc, '', inplace=True)  # 除外の0-1データ
+            must_data.replace(values_to_replace_must, '', inplace=True)  # 必須番組の割り振り秒数データ
+
+            # ブランド名のリストを取得
+            brand_names = brand_data.index.tolist()
+            #ブランドの割り付け情報が入ってる
+            temp_brand_data = limit_data.copy()
+            temp_brand_data = temp_brand_data.drop(columns=[col for col in limit_data.columns if 'Cost/30' in col])
+            temp_brand_data = temp_brand_data.drop(columns=[col for col in limit_data.columns if 'P_seconds' in col])
+            temp_brand_data = temp_brand_data.drop(columns=[col for col in limit_data.columns if 'Program' in col])
+
+            #番組のコストと秒数
+            temp_program_data = limit_data[['Cost/30', 'P_seconds']]
+
+            # 各ブランドの当初の予算を保存
+            allocated_brand_data = brand_data.copy()  # 割り付けに使うブランドごとの予算
+            initial_brand_budget = allocated_brand_data.copy()  # 割り付け前の初期予算
+            used_brand_budget = pd.DataFrame(0, index=brand_names, columns=[120, 60, 30, 15])  # 割り当てられた予算のデータフレーム
+
+            # 視聴データを保持する辞書（ターゲット層に基づく長さを設定）
+            brand_view_data = {}
+            # target_dataがDataFrameであることを仮定
+            brand_target = target_data
+
+            for brand_column in brand_names:
+                # ブランドのターゲット年齢範囲と性別を取得
+                target_age_range = brand_target.loc[brand_column, ['Low', 'High']]  # 年齢範囲
+                target_gender = brand_target.loc[brand_column, 'Gender']  # 性別
+
+                # ターゲット層に一致する視聴データを絞り込み
+                if target_gender == 'MF':
+                    # 「MF」ターゲットの場合、性別に関係なくすべての視聴者を選択
+                    filtered_view_data = view_data[
+                        (view_data['Age'] >= target_age_range[0]) & 
+                        (view_data['Age'] <= target_age_range[1])
+                    ]
+                else:
+                    # 指定された性別と年齢範囲に基づいて絞り込み
+                    filtered_view_data = view_data[
+                        (view_data['Age'] >= target_age_range[0]) & 
+                        (view_data['Age'] <= target_age_range[1]) & 
+                        (view_data['Gender'] == target_gender)
+                    ]
+                
+                # ターゲット層に一致する視聴データのインデックス長さを取得
+                filtered_index = filtered_view_data.index
+                print(len(filtered_index))
+                # ターゲット層に基づいて視聴データを初期化
+                brand_view_data[brand_column] = pd.Series([False] * len(filtered_index), index=filtered_index)
+
+
+            # 割り当て結果を記録するデータフレーム
+            allocated_program_data = pd.DataFrame(columns=['Program_code', 'Brand', 'Allocated_seconds', 'Allocated_cost', 'New_Viewers','Total_Viewers','Potential','Reach_Rate','Round'])
+
+            #アロケのした後のフレーム
+            fin_data = limit_data.copy()
+            #====================================================
+
+            st.write("設定終了")
+
+            #セル3================================================
+            # brand_targetがDataFrameで、'Brand'がインデックスとして設定されている場合
+            for brand_column in temp_brand_data.columns:
+                print(f"\n--- {brand_column} の処理 ---")
+
+                for index, value in temp_brand_data[brand_column].items():
+                    if value == "無し" or pd.isna(value):
+                        continue  # "無し"や NaN の場合はスキップ
+
+                    if value in [15, 30, 60, 120, 240]:  # valueが秒数として有効か確認
+                        program_code, date = index  # 複合キーから program_code と date を取り出す
+                        
+                        print(program_code)
+
+                        # 番組のコストと秒数を取得
+                        program_cost = temp_program_data.loc[(program_code, date), 'Cost/30']
+                        program_seconds = temp_program_data.loc[(program_code, date), 'P_seconds']
+
+                        # ブランドの秒数を減らす
+                        brand_seconds = value  # temp_brand_dataの値がそのまま秒数と仮定
+                        program_seconds_remaining = program_seconds - brand_seconds  # 残り秒数を計算
+
+                        # 番組の秒数を更新する（必要ならtemp_program_dataに反映）
+                        temp_program_data.loc[(program_code, date), 'P_seconds'] = program_seconds_remaining
+
+                        # ブランド名と今回の秒数に基づいてコストを取得
+                        brand_cost = allocated_brand_data.loc[brand_column, value]  # ブランド名と秒数が一致するコストを取得
+                        
+                        # ブランドの秒数とコストを取得
+                        brand_seconds = value  # temp_brand_dataの値がそのまま秒数と仮定
+                        allocated_cost = program_cost * (brand_seconds / 30)  # コストを計算
+
+                        # ブランドの予算を減らす
+                        allocated_brand_data.at[brand_column, value] -= allocated_cost
+                        new_cost = allocated_brand_data.loc[brand_column, value]
+
+                        # 試聴データをターゲット層（年齢・性別）に基づいて絞り込み
+                        target_age_range = brand_target.loc[brand_column, ['Low', 'High']]  # 年齢範囲を取得
+                        target_gender = brand_target.loc[brand_column,'Gender']  # 例: 'Female'
+
+                        if target_gender == 'MF':
+                            # 「MF」ターゲットの場合、性別に関係なくすべての視聴者を選択
+                            filtered_view_data = view_data[
+                                (view_data['Age'] >= target_age_range[0]) & 
+                                (view_data['Age'] <= target_age_range[1])
+                            ]
+                        else:
+                            # 指定された性別と年齢範囲に基づいて絞り込み
+                            filtered_view_data = view_data[
+                                (view_data['Age'] >= target_age_range[0]) & 
+                                (view_data['Age'] <= target_age_range[1]) & 
+                                (view_data['Gender'] == target_gender)
+                            ]
+
+                        # 視聴データを取得（重複を除いた新しい視聴者のみ）
+                        past_viewer = brand_view_data[brand_column].copy()
+                        brand_view_data[brand_column] |= filtered_view_data[program_code]
+                        viewer_add = sum(brand_view_data[brand_column]) - sum(past_viewer)
+                        Reach_rate = brand_view_data[brand_column] / len(brand_view_data[brand_column])
+
+                        # 情報を表示
+                        print(f"Brand: {brand_column}, 秒数: {value}")
+                        print(f"対応するコスト: {brand_cost}")
+                        print(f"Program: {program_code}, Date: {date}")
+                        print(f"Program Cost/30: {program_cost}, Program Seconds: {program_seconds}")
+                        print(f"Brand Allocated Seconds: {brand_seconds}, Brand Allocated Cost: {allocated_cost}")
+                        print(f"新しいブランド予算: {new_cost}")
+                        print(f"残り番組秒数: {program_seconds_remaining}")
+                        print("-" * 50)
+                        print(f"元の視聴データ: {sum(past_viewer)}")
+                        print(f"新規視聴データ: {sum(brand_view_data[brand_column])}")
+                        print(f"新規獲得視聴者: {viewer_add}")
+                        print(f"サンプル数: {len(brand_view_data[brand_column])}")
+
+                        # 新しい行のデータを作成
+                        new_row = pd.DataFrame({
+                            'Program_code': [program_code],
+                            'Brand': [brand_column],
+                            'Allocated_seconds': [brand_seconds],
+                            'Allocated_cost': [allocated_cost],
+                            'New_Viewers': [viewer_add],
+                            'Total_Viewers': [brand_view_data[brand_column]],
+                            'Potential': [len(brand_view_data[brand_column])],
+                            'Reach_Rate': [Reach_rate],
+                            'Round':[None]
+                        })
+
+                        #'Program_code', 'Brand', 'Allocated_seconds', 'Allocated_cost', 'New_Viewers','Total_Viewers','Potential','Reach_Rate','Round'])
+                        
+                        # 既存のデータフレームに新しい行を追加する
+                        allocated_program_data = pd.concat([allocated_program_data, new_row], ignore_index=True)
+            #====================================================
+        
+            st.write("必須終了")
+
+            #セル4================================================
+            pd.set_option('mode.chained_assignment', None)  # チェーンされた代入の警告を無視
+            import warnings
+            warnings.simplefilter(action='ignore', category=FutureWarning)
+
+
+            # view_track DataFrameの初期化
+            view_track = pd.DataFrame(columns=['Brand', 'Round', 'New_Viewers', 'Total_Viewers', 'Reach_Rate'])
+
+            # 初期化
+            seconds_priorities = sorted(brand_data.columns, reverse=True)
+            round_number = 0  # ラウンドカウンタ
+            all_brands_done = False  # 全てのブランドの割り付けが終わったかを確認するフラグ
+            allocated_program_data = pd.DataFrame(columns=['Program_code', 'Brand', 'date', 'Allocated_seconds', 'Allocated_cost', 'New_Viewers'])
+
+            # 割り当て済みの番組コードと日付の組み合わせを保存するためのセット
+            assigned_programs = set()
+
+            # 割り付け可能なブランドがある限り繰り返すループ
+            while not all_brands_done:
+                print(f"\n--- ラウンド {round_number} ---")
+                
+                all_brands_done = True  # すべてのブランドが完了したか確認するために一旦Trueにする
+
+                # 各ブランドごとに割り当てを行う
+                for brand in brand_names:
+                    program_assigned = False  # フラグを初期化
+                    brand_new_viewers = 0  # このラウンドでの新規視聴者数を初期化
+
+                    # ターゲット層（年齢・性別）に基づいて視聴データを絞り込み
+                    target_age_range = brand_target.loc[brand, ['Low', 'High']]  # 年齢範囲
+                    target_gender = brand_target.loc[brand, 'Gender']  # 性別
+
+                    # ターゲット層に一致する視聴データを絞り込む
+                    if target_gender == 'MF':
+                        # 「MF」ターゲットの場合、性別に関係なくすべての視聴者を選択
+                        filtered_view_data = view_data[
+                            (view_data['Age'] >= target_age_range[0]) & 
+                            (view_data['Age'] <= target_age_range[1])
+                        ]
+                    else:
+                        # 指定された性別と年齢範囲に基づいて絞り込み
+                        filtered_view_data = view_data[
+                            (view_data['Age'] >= target_age_range[0]) & 
+                            (view_data['Age'] <= target_age_range[1]) & 
+                            (view_data['Gender'] == target_gender)
+                        ]
+
+                    # 優先する秒数の順にチェック
+                    for seconds in seconds_priorities:
+                        if program_assigned:  # 番組が割り当てられた場合は次のブランドに移行
+                            break
+
+                        brand_rest_cost = allocated_brand_data.at[brand, seconds]
+                        program_cost_arr = temp_program_data['Cost/30'] * (seconds / 30)
+                        program_seconds_arr = temp_program_data['P_seconds']
+
+                        if (program_cost_arr > brand_rest_cost).all():
+                            print(f"{brand}の{seconds}は予算上限に達しています。")
+                            continue
+
+                        if (program_seconds_arr < seconds).all():
+                            print(f"{brand}の{seconds}に割り当てられる番組秒数がありません。")
+                            continue
+
+                        # もし予算が残っていれば番組を割り当てる
+                        if allocated_brand_data.at[brand, seconds] > 0:
+                            best_program = None
+                            best_new_viewers = 0
+                            best_allocated_seconds = 0
+                            best_date = None
+
+                            temp_df = pd.DataFrame()
+                            past_viewer = brand_view_data[brand].copy()  # ここでコピーを取る
+
+                            # 最適な番組を選ぶための処理
+                            for index, value in temp_brand_data[brand].items():
+                                program_code, date = index
+
+                                # 既に割り当てられた番組・日付の組み合わせをチェック
+                                if (program_code, date, brand) in assigned_programs:
+                                    print(f"{brand} に対して、プログラム {program_code}, 日付 {date} は既に割り当て済みです。")
+                                    continue
+
+                                # "無し" または視聴データがNaNでない場合はスキップ
+                                if value == "無し" or not pd.isna(value):
+                                    continue
+
+                                # 番組のコストと秒数を取得
+                                program_cost = temp_program_data.at[(program_code, date), 'Cost/30'] * (seconds / 30)
+                                program_seconds = temp_program_data.at[(program_code, date), 'P_seconds']
+
+                                # 割り当て可能な秒数を確認
+                                if program_seconds < seconds:
+                                    continue
+
+                                # コスト確認
+                                if allocated_brand_data.at[brand, seconds] < program_cost:
+                                    continue
+
+                                # 過去の視聴者数を保持し、新たな視聴者数を計算
+                                if program_code in filtered_view_data.columns:
+                                    new_viewers = filtered_view_data[program_code]
+                                    target_cost = new_viewers.sum() / program_cost
+
+                                    # 既存の視聴者データと結合（視聴した人を1とする場合）
+                                    temp_brand_view_data = past_viewer | new_viewers
+                                    viewer_add = temp_brand_view_data.sum() - past_viewer.sum()
+                                    viewer_add_per_cost = viewer_add / program_cost
+                                else:
+                                    viewer_add = 0
+
+                                if viewer_add <= 0:
+                                    continue
+
+                                # 番組を追加
+                                temp_data = pd.DataFrame({
+                                    'program_code': [program_code],
+                                    'date': [date],
+                                    'viewer_add': [viewer_add],
+                                    'viewer_add_per_cost': [viewer_add_per_cost],
+                                    'target_cost': [target_cost]
+                                })
+
+                                temp_df = pd.concat([temp_df, temp_data], ignore_index=True)
+
+                            mode = str(st.session_state["mode"])
+                            print(mode)
+
+                            # temp_dfから最適な番組を選ぶ
+                            if not temp_df.empty:
+                                print("えへ")
+                                if mode == "reach":
+                                    # リーチが最大のものを選ぶ
+                                    best_row = temp_df.loc[temp_df["viewer_add"].idxmax()]
+                                    if best_row["viewer_add"] > 0:  # 新規視聴者数が正の場合のみ割り付け
+                                        best_program = best_row["program_code"]
+                                        best_date = best_row["date"]
+                                        best_new_viewers = best_row["viewer_add"]
+
+                                elif mode == "reach_cost":
+                                    print("best")
+                                    # リーチ増分に対するコスト効率が最も高いものを選ぶ
+                                    best_row = temp_df.loc[temp_df["viewer_add_per_cost"].idxmin()]
+                                    if best_row["viewer_add"] > 0:  # 新規視聴者数が正の場合のみ割り付け
+                                        best_program = best_row["program_code"]
+                                        best_date = best_row["date"]
+                                        best_new_viewers = best_row["viewer_add"]
+
+                                elif mode == "target_cost":
+                                    # target_costが最も小さいものを選ぶ（必ず割り付け）
+                                    best_row = temp_df.loc[temp_df["target_cost"].idxmin()]
+                                    best_program = best_row["program_code"]
+                                    best_date = best_row["date"]
+                                    best_new_viewers = best_row["viewer_add"]
+
+                            print("ここ")
+
+                            # 最適な番組が見つかった場合の処理
+                            if best_program and best_date is not None:
+                                # 割り当てた番組の処理（コストの減算や視聴者データの更新など）
+                                best_program_cost = temp_program_data.at[(best_program, best_date), 'Cost/30'] * (seconds / 30)
+                                allocated_brand_data.at[brand, seconds] -= best_program_cost
+                                temp_program_data.at[(best_program, best_date), 'P_seconds'] -= seconds
+                                new_viewers = filtered_view_data[best_program]  # 視聴データの更新
+                                brand_view_data[brand] = past_viewer | new_viewers  # 既存の視聴者データと結合（視聴した人を1とする場合）
+                                total_viewers = brand_view_data[brand].sum()
+                                sample_num = len(brand_view_data[brand_column])
+                                view_rate = total_viewers / sample_num
+                                
+                                # 割り当て結果を表示
+                                print(f"最適な番組: {best_program} を {brand} に割り当てます。")
+                                print(f"累計到達数:{total_viewers}, 新規到達数: {best_new_viewers}, 到達率: {view_rate}")
+                                print(f"残り予算: {allocated_brand_data.at[brand, seconds]}, 残り秒数: {temp_program_data.at[(best_program, best_date), 'P_seconds']}")
+                                print(f"更新前サンプル数: {len(past_viewer)}")
+                                print(f"追加サンプル数: {len(past_viewer)}")
+                                print(f"更新後サンプル数: {len(brand_view_data[brand_column])}")
+                                
+                                # 新しい行のデータを作成
+                                new_row = pd.DataFrame({
+                                    'Program_code': [best_program],
+                                    'Brand': [brand],
+                                    'date': [best_date],
+                                    'Allocated_seconds': [seconds],
+                                    'Allocated_cost': [best_program_cost],
+                                    'New_Viewers': [best_new_viewers],
+                                    'Total_Viewers': [total_viewers],
+                                    'Potential': [sample_num],
+                                    'Reach_Rate': [view_rate],
+                                    'Round':[round_number]
+                                })
+
+                                # 既存のデータフレームに新しい行を追加する
+                                allocated_program_data = pd.concat([allocated_program_data, new_row], ignore_index=True)
+
+                                # 同じ番組、日付、ブランドの組み合わせを追跡するためにセットに追加
+                                assigned_programs.add((best_program, best_date, brand))
+
+                                # ブランドごとの新規視聴者数を累積
+                                brand_new_viewers += best_new_viewers
+
+                                # 割り当てが完了したのでフラグをTrueにし、次のブランドに移る
+                                program_assigned = True
+                                all_brands_done = False  # 割り当てが行われたら次のラウンドも行う
+
+                                fin_data.at[(best_program, best_date), brand] = seconds
+                                print("割り付け成功！")
+                                break  # 1ラウンドで1番組のみ割り当てるので、次のブランドに移る
+                            else:
+                                print(f"{brand} の {seconds}秒枠で適切な番組が見つかりませんでした。次の秒数枠に移行します。")
+
+                    # このブランドのラウンド終了時にリーチ率を計算
+                    if program_assigned:
+                        # view_trackにデータを追加
+                        view_track = pd.concat([view_track, pd.DataFrame({
+                            'Brand': [brand],
+                            'Round': [round_number],
+                            'New_Viewers': [brand_new_viewers],
+                            'Total_Viewers': [total_viewers],
+                            'Reach_Rate': [view_rate]
+                        })], ignore_index=True)
+
+                # 全ブランドで番組が割り当てられない場合はループを終了
+                if all_brands_done:
+                    print("すべてのブランドの割り当てが完了しました。")
+                    break
+
+                # ラウンドをカウントアップ
+                round_number += 1
+
+            # 最終割り当て結果を表示
+            print("最終割り当て結果:")
+            print(allocated_program_data)
+
+            # リーチ率の追跡結果を表示
+            print("リーチ率の追跡結果:")
+            print(view_track)
+
+            #====================================================
+        
+            st.write("割り付け終了")
+
+            #セル5================================================
+            # 最終的な視聴率データフレームを初期化
+            fin_view_rate_list = pd.DataFrame(columns=['Brand', 'Total_Viewers', 'Reach_Rate'])
+
+            # 各ブランドの視聴者数とリーチ率を計算
+            for brand in brand_names:
+                total_viewers = brand_view_data[brand].sum()  # ブランドの総視聴者数
+                sample_num = len(brand_view_data[brand])
+                view_rate = (total_viewers / sample_num) if sample_num > 0 else 0  # リーチ率の計算
+                print(f"{brand} サンプル：{sample_num}リーチ{total_viewers}")
+
+                # データを追加
+                fin_view_rate_list = pd.concat([fin_view_rate_list, pd.DataFrame({
+                    'Brand': [brand],
+                    'Total_Viewers': [total_viewers],
+                    'Reach_Rate': [view_rate]
+                })], ignore_index=True)
+
+            # 最終結果を表示
+            st.write(fin_view_rate_list)
+            #====================================================
+
+            st.session_state["processed_data"] = fin_data #素材を割り付けた状態のデータ
+            st.session_state["allocated_cost_data"] = allocated_brand_data #ブランドの残コストデータ
+            st.session_state["allocated_program_data"] = allocated_program_data #割り付けのログ
+
+        # 結果を表示
+        if st.session_state["processed_data"] is not None:
+            st.write("割り付け結果:")
+            st.write(st.session_state["processed_data"])
+            st.write("ブランド残予算:")
+            st.write(st.session_state["allocated_cost_data"])
+            st.write("割り付けトラッキングデータ:")
+            st.write(st.session_state["allocated_program_data"])
+
+def tab5():
+    """アプリケーションのメイン関数"""
+    initialize_session_state()
+
+    # リセットボタン
+    if st.button("リセット", key="reset"):
+        reset_app()
+
+    # 各ステップの画面を表示（過去のステップも残す）
+    display_mode_selection()
+    display_file_upload()
+    display_execution()
+
+#Streamlitを実行する関数
 def main():
     if login():
-        tabs = st.sidebar.radio("メニュー", ["Curve数式予測", "STL分解", "Logistic回帰", "TIME最適化"])
+        tabs = st.sidebar.radio("メニュー", ["Curve数式予測", "STL分解", "Logistic回帰", "TIME最適化","test"])
 
         # ログアウトボタン
         if st.button("ログアウト"):
@@ -913,7 +1466,9 @@ def main():
         elif tabs == "Logistic回帰":
             tab3()
         elif tabs == "TIME最適化":
-            tab4()
+            tab5()
 
+
+#実行コード
 if __name__ == "__main__":
     main()
