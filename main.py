@@ -1339,6 +1339,7 @@ def display_execution():
                             if not temp_df.empty:
                                 print("えへ")
                                 if mode == "reach":
+                                    print("リーチになってる")
                                     # リーチが最大のものを選ぶ
                                     best_row = temp_df.loc[temp_df["viewer_add"].idxmax()]
                                     if best_row["viewer_add"] > 0:  # 新規視聴者数が正の場合のみ割り付け
@@ -1356,6 +1357,7 @@ def display_execution():
                                         best_new_viewers = best_row["viewer_add"]
 
                                 elif mode == "target_cost":
+                                    print("ターゲットコストを選択できてる")
                                     # target_costが最も小さいものを選ぶ（必ず割り付け）
                                     best_row = temp_df.loc[temp_df["target_cost"].idxmin()]
                                     best_program = best_row["program_code"]
