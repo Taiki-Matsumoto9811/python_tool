@@ -1321,6 +1321,8 @@ def display_execution():
                                 if viewer_add <= 0:
                                     continue
 
+                                #新しいviewrが増えないとtempdfに追加されてないから増えないんだ
+
                                 # 番組を追加
                                 temp_data = pd.DataFrame({
                                     'program_code': [program_code],
