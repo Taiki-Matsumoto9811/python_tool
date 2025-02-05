@@ -1361,6 +1361,7 @@ def display_execution():
                                     best_program = best_row["program_code"]
                                     best_date = best_row["date"]
                                     best_new_viewers = best_row["viewer_add"]
+                                    print(best_program)
 
                             print("ここ")
 
