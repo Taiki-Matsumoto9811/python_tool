@@ -769,6 +769,7 @@ def tab4():
                                     best_program = best_row["program_code"]
                                     best_date = best_row["date"]
                                     best_new_viewers = best_row["viewer_add"]
+                                    print("tgコストで選んでる")
 
                             # 最適な番組が見つかった場合の処理
                             if best_program and best_date is not None:
