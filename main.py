@@ -907,14 +907,16 @@ def initialize_session_state():
     """セッションステートの初期化"""
     defaults = {
         "current_step": "モード選択",  # 初期ステップ
-        "uploaded_file": None,  # アップロードされたファイル
+        "uploaded_config_file": None,  # アップロードされた条件ファイル
+        "uploaded_view_file": None, #アップロードされた視聴データファイル
         "processed_data": None,  # 処理されたデータ
         "allocated_cost_data": None,  # 残コストデータ
         "allocated_program_data": None,  # 割り付けログ
         "mode": "",  # モード選択
         "step_status": {
             "モード選択": True,  # 最初のステップをTrue
-            "ファイルアップロード": False,
+            "条件ファイルアップロード": False,
+            "Viewファイルアップロード": False,
             "実行": False,
         },
         # ログイン情報（例: ユーザー情報）はここで保持
@@ -928,7 +930,8 @@ def reset_app():
     """特定のセッションステート項目のみをリセット"""
     keys_to_reset = [
         "current_step", 
-        "uploaded_file", 
+        "uploaded_config_file", 
+        "uploaded_view_file",
         "processed_data", 
         "allocated_cost_data", 
         "allocated_program_data", 
@@ -951,26 +954,44 @@ def display_mode_selection():
             st.warning("モードを選択してください")
         else:
             st.write(f"選択されたモード: {st.session_state['mode']}")
-            if st.button("次へ", key="to_upload"):
-                st.session_state["current_step"] = "ファイルアップロード"
-                st.session_state["step_status"]["ファイルアップロード"] = True
+            if st.button("条件ファイルアップロードへ", key="to_upload"):
+                st.session_state["current_step"] = "条件ファイルアップロード"
+                st.session_state["step_status"]["条件ファイルアップロード"] = True
 
-def display_file_upload():
+def display_config_file_upload():
     """ファイルアップロード画面"""
-    if st.session_state["step_status"]["ファイルアップロード"]:
-        st.header("ファイルアップロード")
-        if st.session_state["uploaded_file"] is None:
-            uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=["xlsx"])
-            if uploaded_file is not None:
-                st.session_state["uploaded_file"] = uploaded_file
+    if st.session_state["step_status"]["条件ファイルアップロード"]:
+        st.header("条件ファイルアップロード")
+        if st.session_state["uploaded_config_file"] is None:
+            uploaded_config_file = st.file_uploader("条件Excelファイルをアップロードしてください", type=["xlsx"])
+            if uploaded_config_file is not None:
+                st.session_state["uploaded_config_file"] = uploaded_config_file
         else:
-            st.write("既にアップロードされたファイルがあります。")
-            st.write(f"アップロード済みファイル: {st.session_state['uploaded_file'].name}")
+            st.write("既にアップロードされた条件ファイルがあります。")
+            st.write(f"アップロード済み条件ファイル: {st.session_state['uploaded_config_file'].name}")
 
-        if st.session_state["uploaded_file"] is not None:
-            if st.button("次へ", key="to_execute"):
+        if st.session_state["uploaded_config_file"] is not None:
+            if st.button("Viewファイルアップロードへ", key="to_execute_config"):
+                st.session_state["current_step"] = "Viewファイルアップロード"
+                st.session_state["step_status"]["Viewファイルアップロード"] = True
+
+def display_view_file_upload():
+    """ファイルアップロード画面"""
+    if st.session_state["step_status"]["Viewファイルアップロード"]:
+        st.header("Viewファイルアップロード")
+        if st.session_state["uploaded_view_file"] is None:
+            uploaded_view_file = st.file_uploader("CSV Viewファイルをアップロードしてください", type=["csv"])
+            if uploaded_view_file is not None:
+                st.session_state["uploaded_view_file"] = uploaded_view_file
+        else:
+            st.write("既にアップロードされたViewファイルがあります。")
+            st.write(f"アップロード済みViewファイル: {st.session_state['uploaded_view_file'].name}")
+
+        if st.session_state["uploaded_view_file"] is not None:
+            if st.button("次へ", key="to_execute_view"):
                 st.session_state["current_step"] = "実行"
                 st.session_state["step_status"]["実行"] = True
+
 
 def display_execution():
     """実行画面"""
@@ -978,26 +999,35 @@ def display_execution():
         st.header("最適化の実行")
         st.write(f"選択されたモード: {st.session_state['mode']}")
 
-        if st.session_state["processed_data"] is None and st.session_state["uploaded_file"] is not None:
+        # config_fileとview_fileがアップロードされている場合のみ処理を実行
+        if st.session_state["processed_data"] is None and st.session_state["uploaded_config_file"] is not None and st.session_state["uploaded_view_file"] is not None:
             st.write("処理を実行しています...")
-            bytes_data = st.session_state["uploaded_file"].read()
-            sheets = pd.read_excel(BytesIO(bytes_data), sheet_name=None)
+
+            # configファイル（Excel）を読み込む
+            bytes_data_config = st.session_state["uploaded_config_file"].read()  # 正しく読み込む
+            config_data = pd.read_excel(BytesIO(bytes_data_config), sheet_name=None)
 
             # 各シートを取得
-            limit_data = sheets['A_Limit'].set_index(['Program_code', 'date'])
-            brand_data = sheets['B_Brand'].set_index('Brand')
-            view_data = sheets['C_View'].set_index('Sample')
-            target_data = sheets['D_Target'].set_index('Brand')
+            limit_data = config_data['A_Limit'].set_index(['Program_code', 'date'])
+            brand_data = config_data['B_Brand'].set_index('Brand')
+            target_data = config_data['D_Target'].set_index('Brand')
+
+            # viewファイル（CSV）からデータを読み込む
+            bytes_data_view = st.session_state["uploaded_view_file"].read()  # 正しく読み込む
+            view_data = pd.read_csv(BytesIO(bytes_data_view))
+
+            # 必要な処理を行う（例: インデックスを設定）
+            view_data = view_data.set_index('Sample')
 
             # データを表示
             st.write("A_Limit シートのデータ")
             st.dataframe(limit_data.head())
             st.write("B_Brand シートのデータ")
             st.dataframe(brand_data.head())
-            st.write("C_View シートのデータ")
-            st.dataframe(view_data.head())
             st.write("D_Target シートのデータ")
             st.dataframe(target_data.head())
+            st.write("C_View シートのデータ")
+            st.dataframe(view_data.head())
 
             # 「無し」という値を空白に置き換え、必須番組データと除外データを作成
             exc_data = limit_data.copy()
@@ -1067,6 +1097,10 @@ def display_execution():
 
             #セル3================================================
             # brand_targetがDataFrameで、'Brand'がインデックスとして設定されている場合
+            # 空のプレースホルダを作成（このエリアがログ表示エリアになります）
+            log_config_placeholder = st.empty()
+            # 初期のログ内容
+            log_config = ""
             for brand_column in temp_brand_data.columns:
                 print(f"\n--- {brand_column} の処理 ---")
 
@@ -1125,7 +1159,14 @@ def display_execution():
                         viewer_add = sum(brand_view_data[brand_column]) - sum(past_viewer)
                         Reach_rate = brand_view_data[brand_column] / len(brand_view_data[brand_column])
 
-                        # 情報を表示
+                        log_config += f"====================================================================================="
+                        log_config += f"{brand_column}の{value}秒を{program_code}:{date}に{program_cost}円で割り付け\n"
+                        log_config += f"{brand_column}の{value}秒の元予算{brand_cost}から残り予算{new_cost}へ\n"
+                        log_config += f"{brand_column}のリーチ数は{sum(past_viewer)}から{sum(brand_view_data[brand_column])}へ\n"
+
+                        # ログ表示を更新
+                        log_config_placeholder.text_area("必須番組処理ログ", log_config, height=300)
+
                         print(f"Brand: {brand_column}, 秒数: {value}")
                         print(f"対応するコスト: {brand_cost}")
                         print(f"Program: {program_code}, Date: {date}")
@@ -1138,6 +1179,7 @@ def display_execution():
                         print(f"新規視聴データ: {sum(brand_view_data[brand_column])}")
                         print(f"新規獲得視聴者: {viewer_add}")
                         print(f"サンプル数: {len(brand_view_data[brand_column])}")
+
 
                         # 新しい行のデータを作成
                         new_row = pd.DataFrame({
@@ -1178,6 +1220,9 @@ def display_execution():
             # 割り当て済みの番組コードと日付の組み合わせを保存するためのセット
             assigned_programs = set()
 
+            log_opt_placeholder = st.empty()
+            # 初期のログ内容
+            log_opt = ""
             # 割り付け可能なブランドがある限り繰り返すループ
             while not all_brands_done:
                 print(f"\n--- ラウンド {round_number} ---")
@@ -1322,6 +1367,7 @@ def display_execution():
                             if best_program and best_date is not None:
                                 # 割り当てた番組の処理（コストの減算や視聴者データの更新など）
                                 best_program_cost = temp_program_data.at[(best_program, best_date), 'Cost/30'] * (seconds / 30)
+                                old_cost = allocated_brand_data.at[brand, seconds]
                                 allocated_brand_data.at[brand, seconds] -= best_program_cost
                                 temp_program_data.at[(best_program, best_date), 'P_seconds'] -= seconds
                                 new_viewers = filtered_view_data[best_program]  # 視聴データの更新
@@ -1337,6 +1383,13 @@ def display_execution():
                                 print(f"更新前サンプル数: {len(past_viewer)}")
                                 print(f"追加サンプル数: {len(past_viewer)}")
                                 print(f"更新後サンプル数: {len(brand_view_data[brand_column])}")
+
+                                log_opt += f"================================================================================"
+                                log_opt += f"{brand}の{seconds}秒を{best_program}:{best_date}に{best_program_cost}円で割り付け\n"
+                                log_opt += f"{brand}の{seconds}秒の元予算{old_cost}から残り予算{allocated_brand_data.at[brand, seconds]}へ\n"
+                                log_opt += f"{brand}のリーチ数は{sum(past_viewer)}から{total_viewers}へ\n"
+                                # ログ表示を更新
+                                log_opt_placeholder.text_area("最適番組処理ログ", log_opt, height=300)
                                 
                                 # 新しい行のデータを作成
                                 new_row = pd.DataFrame({
@@ -1447,7 +1500,8 @@ def tab5():
 
     # 各ステップの画面を表示（過去のステップも残す）
     display_mode_selection()
-    display_file_upload()
+    display_config_file_upload()
+    display_view_file_upload()
     display_execution()
 
 #Streamlitを実行する関数
